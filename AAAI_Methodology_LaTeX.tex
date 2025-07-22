@@ -1,0 +1,98 @@
+\section{Methodology}
+
+Our proposed Cuboid Transformer architecture introduces a novel spatiotemporal prediction framework that effectively integrates multi-modal meteorological data through sophisticated cross-attention mechanisms. The methodology comprises three core components: information fusion for multi-modal data integration, temporal cross-attention for capturing long-term dependencies, and spatial multi-scale cross-attention for hierarchical spatial feature extraction.
+
+\subsection{Multi-Modal Information Fusion}
+
+The foundation of our approach lies in the effective fusion of heterogeneous meteorological data streams, specifically precipitation data ($\mathbf{x}_1$) and lightning data ($\mathbf{x}_2$) from the SEVIR dataset. This dual-stream architecture enables comprehensive weather pattern understanding by leveraging the complementary nature of these data modalities.
+
+\textbf{Data Preprocessing and Alignment:} Both input streams $\mathbf{x}_1 \in \mathbb{R}^{B \times T \times H \times W \times C}$ and $\mathbf{x}_2 \in \mathbb{R}^{B \times T \times H \times W \times C}$ undergo identical spatial-temporal preprocessing to ensure dimensional consistency, where $B$ represents batch size, $T$ denotes temporal length, $H$ and $W$ are spatial dimensions, and $C$ is the channel dimension. Layer normalization is applied to both streams independently to stabilize training dynamics.
+
+\textbf{Cuboid Decomposition Strategy:} Following the cuboid attention paradigm, we partition the input tensor $(T, H, W)$ into non-overlapping cuboids of size $(b_t, b_h, b_w)$. The decomposition supports both local and dilated strategies, enabling flexible spatial-temporal locality modeling. For meteorological data, we primarily employ local decomposition with adaptive cuboid sizing based on the temporal resolution of weather phenomena.
+
+\textbf{Initial Feature Alignment:} Before cross-modal interaction, both data streams are processed through shared embedding layers to project them into a unified feature space. This alignment ensures that precipitation and lightning features can be meaningfully compared and combined in subsequent attention computations.
+
+\subsection{Temporal Cross-Attention Mechanism}
+
+The temporal cross-attention component captures long-range temporal dependencies by enabling each time step to selectively attend to relevant information across the entire temporal sequence from the complementary data stream.
+
+\textbf{Cross-Modal Query-Key-Value Computation:} For temporal attention, we compute queries $\mathbf{Q}_{\text{temp}}$ from $\mathbf{x}_1$, while keys $\mathbf{K}_{\text{temp}}$ and values $\mathbf{V}_{\text{temp}}$ are derived from $\mathbf{x}_2$, and vice versa. This asymmetric design allows each modality to actively seek relevant information from the other:
+
+\begin{align}
+\mathbf{Q}_{\text{temp}}^{(1)} &= \mathbf{x}_1 \mathbf{W}_q^{\text{temp}}, \quad \mathbf{K}_{\text{temp}}^{(2)} = \mathbf{x}_2 \mathbf{W}_k^{\text{temp}}, \quad \mathbf{V}_{\text{temp}}^{(2)} = \mathbf{x}_2 \mathbf{W}_v^{\text{temp}} \\
+\mathbf{Q}_{\text{temp}}^{(2)} &= \mathbf{x}_2 \mathbf{W}_q^{\text{temp}}, \quad \mathbf{K}_{\text{temp}}^{(1)} = \mathbf{x}_1 \mathbf{W}_k^{\text{temp}}, \quad \mathbf{V}_{\text{temp}}^{(1)} = \mathbf{x}_1 \mathbf{W}_v^{\text{temp}}
+\end{align}
+
+\textbf{Temporal Attention Computation:} The temporal cross-attention weights are computed as:
+
+\begin{equation}
+\mathbf{A}_{\text{temp}} = \text{softmax}\left(\frac{\mathbf{Q}_{\text{temp}}^{(1)} {\mathbf{K}_{\text{temp}}^{(2)}}^{\top}}{\sqrt{d_k}}\right)
+\end{equation}
+
+where $d_k$ is the key dimension. This allows each temporal position in the precipitation data to attend to all temporal positions in the lightning data, capturing cross-modal temporal correlations.
+
+\textbf{Gated Fusion for Temporal Features:} To control information flow and prevent feature interference, we employ a learnable gating mechanism:
+
+\begin{align}
+\mathbf{G}_{\text{temp}} &= \sigma\left(\mathbf{W}_g \left[\mathbf{x}_1; \mathbf{A}_{\text{temp}} \mathbf{V}_{\text{temp}}^{(2)}\right]\right) \\
+\mathbf{F}_{\text{temp}} &= \mathbf{G}_{\text{temp}} \odot \left(\mathbf{W}_f \mathbf{A}_{\text{temp}} \mathbf{V}_{\text{temp}}^{(2)}\right)
+\end{align}
+
+where $\sigma$ is the sigmoid function, $[\cdot;\cdot]$ denotes concatenation, $\odot$ represents element-wise multiplication, and $\mathbf{W}_g$, $\mathbf{W}_f$ are learnable transformation matrices.
+
+\subsection{Spatial Multi-Scale Cross-Attention}
+
+The spatial multi-scale cross-attention mechanism addresses the challenge of capturing meteorological phenomena at different spatial scales, from local convective cells to large-scale weather systems.
+
+\textbf{Multi-Scale Spatial Decomposition:} We implement a hierarchical spatial attention mechanism operating at multiple scales $\mathcal{S} = \{1, 2, 4\}$. For each scale $s \in \mathcal{S}$, spatial features are downsampled using adaptive pooling:
+
+\begin{align}
+\mathbf{x}_1^{(s)} &= \text{AdaptivePool}(\mathbf{x}_1, \text{scale}=s) \\
+\mathbf{x}_2^{(s)} &= \text{AdaptivePool}(\mathbf{x}_2, \text{scale}=s)
+\end{align}
+
+The pooling operation intelligently handles boundary conditions, skipping pooling when spatial dimensions $(b_h, b_w)$ equal 1 to prevent degenerate cases.
+
+\textbf{Scale-Specific Cross-Attention:} Each scale maintains dedicated query, key, and value projection networks to capture scale-appropriate feature representations:
+
+\begin{equation}
+\mathbf{Q}_{\text{spatial}}^{(s,1)} = \mathbf{x}_1^{(s)} \mathbf{W}_q^{(s)}, \quad \mathbf{K}_{\text{spatial}}^{(s,2)} = \mathbf{x}_2^{(s)} \mathbf{W}_k^{(s)}, \quad \mathbf{V}_{\text{spatial}}^{(s,2)} = \mathbf{x}_2^{(s)} \mathbf{W}_v^{(s)}
+\end{equation}
+
+The cross-attention computation at scale $s$ is:
+
+\begin{align}
+\mathbf{A}_{\text{spatial}}^{(s)} &= \text{softmax}\left(\frac{\mathbf{Q}_{\text{spatial}}^{(s,1)} {\mathbf{K}_{\text{spatial}}^{(s,2)}}^{\top}}{\sqrt{d_k}}\right) \\
+\mathbf{F}_{\text{spatial}}^{(s)} &= \mathbf{A}_{\text{spatial}}^{(s)} \mathbf{V}_{\text{spatial}}^{(s,2)}
+\end{align}
+
+\textbf{Upsampling and Feature Aggregation:} Features computed at different scales are upsampled back to the original spatial resolution using nearest-neighbor interpolation to preserve spatial coherence:
+
+\begin{equation}
+\mathbf{F}_{\text{spatial}}^{(s,\uparrow)} = \text{Upsample}\left(\mathbf{F}_{\text{spatial}}^{(s)}, \text{size}=(b_h, b_w)\right)
+\end{equation}
+
+The multi-scale features are then aggregated through weighted averaging:
+
+\begin{equation}
+\mathbf{F}_{\text{spatial}} = \frac{1}{|\mathcal{S}|} \sum_{s \in \mathcal{S}} \mathbf{F}_{\text{spatial}}^{(s,\uparrow)}
+\end{equation}
+
+\textbf{Spatial Gating and Integration:} Similar to temporal attention, spatial features undergo gated fusion to ensure selective information integration:
+
+\begin{align}
+\mathbf{G}_{\text{spatial}} &= \sigma\left(\mathbf{W}_g^{\text{spatial}} \left[\mathbf{x}_1; \mathbf{F}_{\text{spatial}}\right]\right) \\
+\mathbf{F}_{\text{spatial}}^{\text{final}} &= \mathbf{G}_{\text{spatial}} \odot \left(\mathbf{W}_f^{\text{spatial}} \mathbf{F}_{\text{spatial}}\right)
+\end{align}
+
+\textbf{Final Feature Fusion:} The temporal and spatial cross-attention outputs are combined through a final fusion layer with gating control:
+
+\begin{align}
+\mathbf{F}_{\text{combined}} &= \mathbf{W}_{\text{fusion}} \left[\mathbf{F}_{\text{temp}}; \mathbf{F}_{\text{spatial}}^{\text{final}}\right] \\
+\mathbf{G}_{\text{final}} &= \sigma\left(\mathbf{W}_g^{\text{final}} \left[\mathbf{x}_1; \mathbf{F}_{\text{combined}}\right]\right) \\
+\text{Output} &= \mathbf{G}_{\text{final}} \odot \mathbf{F}_{\text{combined}} + \mathbf{x}_1
+\end{align}
+
+This residual connection preserves the original input information while enhancing it with cross-modal spatiotemporal features. The symmetric processing ensures that both $\mathbf{x}_1$ and $\mathbf{x}_2$ benefit from cross-modal attention, with the final outputs being $\mathbf{F}_1$ and $\mathbf{F}_2$ respectively.
+
+The proposed architecture leverages global vector support for maintaining global spatiotemporal context, though this component serves as an auxiliary enhancement rather than a core innovation. Through this comprehensive methodology, our Cuboid Transformer effectively captures complex spatiotemporal dependencies in meteorological data while facilitating robust multi-modal information fusion for accurate weather prediction.
